@@ -1,13 +1,14 @@
 ! File: pcap.factor
 ! Version: 0.1
-! DRI: Dave Carlton
+! DRI: Dave Carlton <davec@polymicro.net>
 ! Description: Vocabulary to read pcap files created by tcpdump.
-! Copyright (C) 2013 Dave Carlton.
+! Copyright (C) 2013 Dave Carlton
 ! See http://factorcode.org/license.txt for BSD license.
 
-USING: accessors alien.accessors alien.c-types alien.endian
-alien.syntax classes.struct io io.encodings.binary io.files kernel
-namespaces struct variables ;
+USING: accessors alien alien.accessors alien.c-types alien.endian
+alien.libraries alien.syntax classes.struct combinators io
+io.encodings.binary io.files kernel libc namespaces struct system
+variables ;
 
 IN: pcap
 
@@ -82,7 +83,7 @@ LE-PACKED-STRUCT: le-pcap-header
 { pcap_zoff uint }
 { pcap_tsa uint }
 { pcap_snaplen uint }
-{ pcap_headtype uint }
+{ pcap_linktype uint }
 ;
 
 VAR: pcap-filereader
@@ -129,4 +130,124 @@ PRIVATE>
     [ pcap-header sizeof read ] with-pcapfile
     pcap-header memory>struct ;
 
-"~/Desktop/9997.dmp" <pcapfile>
+<< "pcap" {
+    { [ os macosx? ] [ "libpcap.dylib" cdecl add-library ] }
+    { [ os windows? ] [ "pcap.dll" cdecl add-library ] }
+    [ drop ]
+} cond >>
+
+LIBRARY: pcaplib
+
+CONSTANT: PCAP_ERRBUF_SIZE 256
+VAR: testfile 
+VAR: errstring 
+VAR: fp
+VAR: pcapFILE
+
+! int pcap_findalldevs_ex	( 	char * 	  host,
+! char * 	  port,
+! SOCKET 	  sockctrl,
+! struct pcap_rmtauth * 	  auth,
+! pcap_if_t ** 	  alldevs,
+! char * 	  errbuf
+! ) 	
+TYPEDEF: int SOCKET
+STRUCT: pcap_rmtauth
+{ type int }
+{ username char* }
+{ password char* }
+;
+
+STRUCT: sockaddr 
+    { sa_family short }
+    { sa_data char[14] }
+    ;
+
+STRUCT: pcap_addr 
+    { next pcap_addr* }
+    { addr sockaddr* }
+    { netmask sockaddr* }
+    { broadaddr sockaddr* }
+    { dstaddr sockaddr* }
+    ;
+
+TYPEDEF: uint bpf_u_int32
+STRUCT: pcap_if 
+    { next pcap_if* }
+    { name char* }
+    { description char* }
+    { addresses pcap_addr*  }
+    { flags bpf_u_int32 }
+    ;
+
+TYPEDEF: pcap_if* pcap_if_t
+
+STRUCT: pcap_stat_ex
+{ rx_packets ulong }
+{ tx_packets ulong }
+{ rx_bytes ulong } 
+{ tx_bytes ulong } 
+{ rx_errors ulong }
+{ tx_errors ulong }
+{ rx_dropped ulong }
+{ tx_dropped ulong }
+{ multicast ulong } 
+{ collisions ulong }
+{ rx_length_errors ulong }
+{ rx_over_errors ulong }
+{ rx_crc_errors ulong } 
+{ rx_frame_errors ulong }
+{ rx_fifo_errors ulong } 
+{ rx_missed_errors ulong }
+{ tx_aborted_errors ulong }
+{ tx_carrier_errors ulong }
+{ tx_fifo_errors ulong }
+{ tx_heartbeat_errors ulong }
+{ tx_window_errors ulong }
+;
+
+FUNCTION: int pcap_findalldevs_ex ( c-string host, c-string port, SOCKET sockctrl, pcap_rmtauth* auth, pcap_if_t* alldevs, char* errbuf ) ;
+
+! pcap_t *pcap_open_offline(const char *fname, char *errbuf);
+TYPEDEF: void* pcap_t
+FUNCTION: pcap_t pcap_open_offline ( c-string fname char* errbuf ) ;
+
+! FILE *pcap_file(pcap_t *p);
+TYPEDEF: void* FILE_ptr
+FUNCTION: FILE_ptr pcap_file ( pcap_t *p ) ;
+
+! const u_char *pcap_next(pcap_t *p, struct pcap_pkthdr *h);
+PACKED-STRUCT: pcap_pkthdr
+{ pcap_magic uint }
+{ pcap_vmajor ushort }
+{ pcap_vminor ushort }
+{ pcap_zoff uint }
+{ pcap_tsa uint }
+{ pcap_snaplen uint }
+{ pcap_linktype uint }
+;
+
+FUNCTION: void* pcap_next ( pcap_t* p, pcap_pkthdr* h ) ;
+
+! int pcap_next_ex(pcap_t *p, struct pcap_pkthdr **pkt_header,  const u_char **pkt_data);
+TYPEDEF: char* pktdata
+TYPEDEF: pcap_pkthdr* pkthdr
+FUNCTION: int pcap_next_ex ( pcap_t* fp, pkthdr* pkt_header, pktdata* pkt_data ) ;
+
+! int pcap_snapshot(pcap_t *p);
+FUNCTION: int pcap_snapshot ( pcap_t *p ) ;
+
+! void pcap_close(pcap_t *p);
+FUNCTION: void pcap_close ( pcap_t *p ) ;
+
+: setup-read ( -- )
+    "/Users/davec/Desktop/9997.dmp" set: testfile
+    PCAP_ERRBUF_SIZE malloc  set: errstring
+    testfile errstring pcap_open_offline  set: fp
+    fp pcap_file  set: pcapFILE ;
+
+VAR: next-header
+: next ( -- x )
+!    pcap_pkthdr malloc-struct set: next-header
+    pcap_pkthdr heap-size malloc set: next-header
+    fp next-header pcap_next ;
